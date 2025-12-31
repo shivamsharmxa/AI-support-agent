@@ -11,6 +11,11 @@ export class ChatService {
         return prisma.conversation.create({ data: {} });
     }
 
+    static async exists(conversationId: number) {
+        const count = await prisma.conversation.count({ where: { id: conversationId } });
+        return count > 0;
+    }
+
     static async getMessages(conversationId: number) {
         return prisma.message.findMany({
             where: { conversationId },

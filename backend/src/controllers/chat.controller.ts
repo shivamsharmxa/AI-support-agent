@@ -34,7 +34,14 @@ export class ChatController {
 
             let finalConversationId = conversationId;
 
-            // Auto-create conversation if missing
+            // Auto-create conversation if missing OR invalid (stale ID)
+            if (finalConversationId) {
+                const exists = await ChatService.exists(finalConversationId);
+                if (!exists) {
+                    finalConversationId = undefined;
+                }
+            }
+
             if (!finalConversationId) {
                 const newConv = await ChatService.createConversation();
                 finalConversationId = newConv.id;
