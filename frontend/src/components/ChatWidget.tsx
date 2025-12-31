@@ -2,36 +2,51 @@ import { useState, useEffect, useRef } from 'react';
 import type { Message } from '../types';
 import { playSendSound, playReceiveSound, playTypingSound } from '../utils/sound';
 
-const API_URL = 'http://localhost:3000/api';
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
-export default function ChatWidget() {
-    const [isOpen, setIsOpen] = useState(false);
+interface ChatWidgetProps {
+    isOpen: boolean;
+    onClose: () => void;
+}
 
-    // Listens for external clicks to open the chat (e.g. from Landing Page CTA)
-    useEffect(() => {
-        const handler = () => setIsOpen(true);
-        const launcher = document.querySelector('.chat-launcher-trigger');
-        if (launcher) launcher.addEventListener('click', handler);
-        return () => {
-            if (launcher) launcher.removeEventListener('click', handler);
-        };
-    }, []);
-
+export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [conversationId, setConversationId] = useState<number | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Create conversation when widget opens
+    // Load/Create Conversation
     useEffect(() => {
-        if (isOpen && !conversationId) {
-            fetch(`${API_URL}/conversations`, { method: 'POST' })
-                .then(res => res.json())
-                .then(data => setConversationId(data.id))
-                .catch(err => console.error('Failed to create conversation:', err));
-        }
-    }, [isOpen, conversationId]);
+        const initChat = async () => {
+            if (!isOpen) return;
+
+            let storedId = localStorage.getItem('spur_conversation_id');
+
+            try {
+                if (storedId) {
+                    // Fetch History
+                    const res = await fetch(`${API_URL}/api/conversations/${storedId}/messages`);
+                    if (res.ok) {
+                        const history = await res.json();
+                        setMessages(history);
+                        return;
+                    }
+                }
+
+                // Create New if no ID or fetch failed
+                const res = await fetch(`${API_URL}/api/conversations`, { method: 'POST' });
+                const data = await res.json();
+                localStorage.setItem('spur_conversation_id', String(data.id));
+                storedId = String(data.id);
+                setMessages([]);
+
+            } catch (err) {
+                console.error('Failed to init chat:', err);
+            }
+        };
+
+        initChat();
+    }, [isOpen]);
 
     // Scroll to bottom
     useEffect(() => {
@@ -39,14 +54,15 @@ export default function ChatWidget() {
     }, [messages, isOpen, loading]);
 
     const handleSend = async () => {
+        const conversationId = Number(localStorage.getItem('spur_conversation_id'));
         if (!input.trim() || loading || !conversationId) return;
 
         const userText = input.trim();
         setInput('');
         setLoading(true);
-        playSendSound(); // Sound effect
+        playSendSound();
 
-        // Optimistically add user message
+        // Optimistic UI
         const optimisticMsg: Message = {
             id: Date.now(),
             conversationId,
@@ -57,25 +73,31 @@ export default function ChatWidget() {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            const res = await fetch(`${API_URL}/chat`, {
+            const res = await fetch(`${API_URL}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ conversationId, text: userText }),
             });
 
-            if (!res.ok) throw new Error('Failed to send');
+            if (!res.ok) {
+                if (res.status === 429) throw new Error('Too many requests');
+                throw new Error('Failed to send');
+            }
 
             const data = await res.json();
             setMessages(prev => [...prev, data.aiMessage]);
-            playReceiveSound(); // Sound effect
+            playReceiveSound();
         } catch (error) {
             console.error('Error sending message:', error);
-            // Optional: Show error toast
+            const errorMessage = error instanceof Error && error.message === 'Too many requests'
+                ? "You are sending messages too fast. Please wait a moment."
+                : "Something went wrong. Please try again.";
+
             setMessages(prev => [...prev, {
                 id: Date.now() + 1,
                 conversationId,
                 sender: 'ai',
-                text: "Something went wrong. Please try again.",
+                text: errorMessage,
                 createdAt: new Date().toISOString()
             }]);
         } finally {
@@ -92,90 +114,78 @@ export default function ChatWidget() {
         }
     };
 
+    if (!isOpen) return null;
+
     return (
-        <div className="chat-interface">
-            {!isOpen && (
-                <button
-                    className="chat-launcher"
-                    onClick={() => setIsOpen(true)}
-                    aria-label="Open chat"
-                >
-                    💬
-                </button>
-            )}
-
-            {isOpen && (
-                <div className="chat-widget">
-                    {/* Header */}
-                    <div className="chat-header">
-                        <div className="header-info">
-                            <h3>Spur Support</h3>
-                            <p>
-                                <span className="status-dot"></span>
-                                AI Assistant
-                            </p>
-                        </div>
-                        <button
-                            className="close-button"
-                            onClick={() => setIsOpen(false)}
-                            aria-label="Close chat"
-                        >
-                            ×
-                        </button>
-                    </div>
-
-                    {/* Messages */}
-                    <div className="chat-messages">
-                        {messages.length === 0 && (
-                            <div className="message ai">
-                                <div className="message-bubble">
-                                    Hello! How can I help you with your order today?
-                                </div>
-                                <div className="message-time">Just now</div>
-                            </div>
-                        )}
-
-                        {messages.map((msg) => (
-                            <div key={msg.id} className={`message ${msg.sender}`}>
-                                <div className="message-bubble">{msg.text}</div>
-                                <div className="message-time">
-                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                            </div>
-                        ))}
-
-                        {loading && (
-                            <div className="typing-indicator">
-                                <div className="dot"></div>
-                                <div className="dot"></div>
-                                <div className="dot"></div>
-                            </div>
-                        )}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {/* Input */}
-                    <div className="chat-input-area">
-                        <input
-                            type="text"
-                            className="chat-input"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyPress}
-                            placeholder="Type your message..."
-                            disabled={loading}
-                        />
-                        <button
-                            className="send-button"
-                            onClick={handleSend}
-                            disabled={!input.trim() || loading}
-                            aria-label="Send message"
-                        >
-                            ➤
-                        </button>
-                    </div>
+        <div className="chat-widget">
+            {/* Header */}
+            <div className="chat-header">
+                <div className="header-info">
+                    <h3>Spur Support</h3>
+                    <p>
+                        <span className="status-dot"></span>
+                        AI Assistant
+                    </p>
                 </div>
-            )}
+                <button
+                    className="close-button"
+                    onClick={onClose}
+                    aria-label="Close chat"
+                >
+                    ×
+                </button>
+            </div>
+
+            {/* Messages */}
+            <div className="chat-messages">
+                {messages.length === 0 && (
+                    <div className="message ai">
+                        <div className="message-bubble">
+                            Hello! How can I help you with your order today?
+                        </div>
+                        <div className="message-time">Just now</div>
+                    </div>
+                )}
+
+                {messages.map((msg) => (
+                    <div key={msg.id} className={`message ${msg.sender}`}>
+                        <div className="message-bubble">{msg.text}</div>
+                        <div className="message-time">
+                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                    </div>
+                ))}
+
+                {loading && (
+                    <div className="typing-indicator">
+                        <div className="dot"></div>
+                        <div className="dot"></div>
+                        <div className="dot"></div>
+                    </div>
+                )}
+                <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="chat-input-area">
+                <input
+                    type="text"
+                    className="chat-input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyPress}
+                    placeholder="Type your message..."
+                    disabled={loading}
+                />
+                <button
+                    className="send-button"
+                    onClick={handleSend}
+                    disabled={!input.trim() || loading}
+                    aria-label="Send message"
+                >
+                    ➤
+                </button>
+            </div>
         </div>
     );
 }

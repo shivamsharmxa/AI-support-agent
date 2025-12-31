@@ -1,5 +1,16 @@
-node_modules
-# Keep environment variables out of version control
-.env
 
-/generated/prisma
+# Compiled
+dist/
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+
+# DB
+*.db
+*.db-journal
+
+# Env
+.env
+node_modules/
+.DS_Store

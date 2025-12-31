@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import ChatWidget from './components/ChatWidget';
 
 function App() {
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
   return (
     <div className="landing-page">
       <div className="hero-content">
@@ -11,12 +14,24 @@ function App() {
           See how our AI Assistant can transform your customer service today.
         </p>
         <button
-          className="cta-button chat-launcher-trigger"
+          className="cta-button"
+          onClick={() => setIsChatOpen(true)}
         >
           Start Chatting
         </button>
       </div>
-      <ChatWidget />
+
+      {!isChatOpen && (
+        <button
+          className="chat-launcher"
+          onClick={() => setIsChatOpen(true)}
+          aria-label="Open chat"
+        >
+          💬
+        </button>
+      )}
+
+      <ChatWidget isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
     </div>
   );
 }
