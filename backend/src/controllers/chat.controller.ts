@@ -36,7 +36,7 @@ export class ChatController {
             res.json(result);
         } catch (error) {
             if (error instanceof z.ZodError) {
-                return res.status(400).json({ error: (error as z.ZodError).errors });
+                return res.status(400).json({ error: error.issues });
             }
             console.error(error);
             res.status(500).json({ error: 'Internal Server Error' });
