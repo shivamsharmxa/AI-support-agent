@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ChatService } from '../services/chat.service';
 
 const chatSchema = z.object({
-    conversationId: z.number().int().positive(),
+    conversationId: z.number().optional(),
     text: z.string().min(1).max(500),
 });
 
@@ -29,11 +29,23 @@ export class ChatController {
 
     static async sendMessage(req: Request, res: Response) {
         try {
-            // Input Validation
-            const { conversationId, text } = chatSchema.parse(req.body);
+            // Validate input (conversationId is now optional)
+            const { text, conversationId } = chatSchema.parse(req.body);
 
-            const result = await ChatService.processMessage(conversationId, text);
-            res.json(result);
+            let finalConversationId = conversationId;
+
+            // Auto-create conversation if missing
+            if (!finalConversationId) {
+                const newConv = await ChatService.createConversation();
+                finalConversationId = newConv.id;
+            }
+
+            const result = await ChatService.processMessage(finalConversationId, text);
+            res.json({
+                ...result,
+                conversationId: finalConversationId // Return the ID so frontend can save it
+            });
+
         } catch (error) {
             if (error instanceof z.ZodError) {
                 return res.status(400).json({ error: error.issues });
